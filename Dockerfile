@@ -2,8 +2,6 @@
 
 # Base image
 FROM python:3.12-slim-bullseye as base
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -26,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python dependencies
 # We copy requirements first to leverage Docker cache
 COPY requirements.txt .
-RUN RUN uv pip install --system --no-cache -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
