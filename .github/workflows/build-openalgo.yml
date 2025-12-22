@@ -1,4 +1,4 @@
-name: Build OpenAlgo for Coolify
+name: Build OpenAlgo
 
 on:
   workflow_dispatch:
