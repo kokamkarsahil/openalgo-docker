@@ -2,6 +2,9 @@ name: Build OpenAlgo
 
 on:
   workflow_dispatch:
+  schedule:
+    # Check for new releases daily at midnight UTC
+    - cron: '0 0 * * *'
 
 env:
   REGISTRY: ghcr.io
@@ -9,7 +12,35 @@ env:
   UPSTREAM_REPO: marketcalls/openalgo
 
 jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.get_release.outputs.tag }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Get Latest Release Tag from Upstream
+        id: get_release
+        run: |
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/latest | jq -r .tag_name)
+          echo "Latest release is $LATEST_RELEASE"
+          echo "tag=$LATEST_RELEASE" >> $GITHUB_OUTPUT
+
+      - name: Check if Image Already Exists
+        id: check
+        run: |
+          # Try to pull the image with the tag
+          if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_release.outputs.tag }} > /dev/null 2>&1; then
+            echo "Image already exists for tag ${{ steps.get_release.outputs.tag }}"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "Image does not exist, will build"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
   build-and-push:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,18 +52,11 @@ jobs:
         with:
           path: helper
 
-      - name: Get Latest Release Tag from Upstream
-        id: get_release
-        run: |
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/latest | jq -r .tag_name)
-          echo "Latest release is $LATEST_RELEASE"
-          echo "tag=$LATEST_RELEASE" >> $GITHUB_OUTPUT
-
       - name: Checkout Upstream OpenAlgo Code
         uses: actions/checkout@v4
         with:
           repository: ${{ env.UPSTREAM_REPO }}
-          ref: ${{ steps.get_release.outputs.tag }}
+          ref: ${{ needs.check-release.outputs.tag }}
           path: build-context
 
       - name: Setup Custom Dockerfile
@@ -61,6 +85,7 @@ jobs:
           files: |
             docker-bake.hcl
           set: |
-            *.args.TAG=${{ steps.get_release.outputs.tag }}
+            *.args.TAG=${{ needs.check-release.outputs.tag }}
             *.args.REGISTRY=${{ env.REGISTRY }}
             *.args.IMAGE_NAME=${{ env.IMAGE_NAME }}
+

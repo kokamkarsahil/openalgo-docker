@@ -1,59 +1,71 @@
-# syntax=docker/dockerfile:1
+# ------------------------------ Builder Stage ------------------------------ #
+FROM python:3.12-bullseye AS builder
 
-# Base image
-FROM python:3.12-slim-bullseye as base
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    FLASK_ENV=production \
-    APP_MODE=standalone \
-    FLASK_HOST_IP=0.0.0.0 \
-    WEBSOCKET_HOST=0.0.0.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl build-essential && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install system dependencies (curl and supervisor)
+COPY pyproject.toml .
+
+# Create isolated virtual-env with uv, then add gunicorn and eventlet
+RUN pip install --no-cache-dir uv && \
+    uv venv .venv && \
+    uv pip install --upgrade pip && \
+    uv sync && \
+    uv pip install gunicorn eventlet==0.35.2 && \
+    rm -rf /root/.cache
+
+# ----------------------------- Production Stage ---------------------------- #
+FROM python:3.12-slim-bullseye AS production
+
+# Set timezone to IST (Asia/Kolkata) and install minimal runtime deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    supervisor \
-    gcc \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+        tzdata \
+        curl && \
+    ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-# We copy requirements first to leverage Docker cache
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Create non-root user
+RUN useradd --create-home appuser
 
-# Copy application code
-COPY . .
+WORKDIR /app
 
-# Create necessary directories for persistence
-RUN mkdir -p /app/log /app/logs /app/keys /app/db /app/strategies \
-    && chmod -R 755 /app/log /app/logs /app/strategies
+# Copy the ready-made venv and source with correct ownership
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+COPY --chown=appuser:appuser . .
 
-# Configuration for Supervisor (runs both Flask and Websockets)
-RUN echo "[supervisord]" > /etc/supervisor/conf.d/supervisord.conf && \
-    echo "nodaemon=true" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "[program:flask]" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "command=python3 app.py" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "stdout_logfile=/dev/stdout" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "stdout_logfile_maxbytes=0" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "stderr_logfile=/dev/stderr" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "stderr_logfile_maxbytes=0" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "[program:websocket]" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "command=python3 websocket_server.py" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "stdout_logfile=/dev/stdout" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "stdout_logfile_maxbytes=0" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "stderr_logfile=/dev/stderr" >> /etc/supervisor/conf.d/supervisord.conf && \
-    echo "stderr_logfile_maxbytes=0" >> /etc/supervisor/conf.d/supervisord.conf
+# Create required directories with proper permissions
+RUN mkdir -p /app/log /app/log/strategies /app/db /app/strategies \
+             /app/strategies/scripts /app/strategies/examples /app/keys /app/logs && \
+    chown -R appuser:appuser /app && \
+    chmod -R 755 /app/strategies /app/log && \
+    chmod 700 /app/keys && \
+    touch /app/.env && chown appuser:appuser /app/.env && chmod 666 /app/.env
 
-# Expose ports (Flask: 5000, WebSocket: 8765)
-EXPOSE 5000 8765
+# Copy and fix entrypoint script
+COPY --chown=appuser:appuser start.sh /app/start.sh
+RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 
-# Volume definitions for persistence
-VOLUME ["/app/db", "/app/keys", "/app/strategies", "/app/logs"]
+# ---- Runtime Environment -------------------------------------------------- #
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TZ=Asia/Kolkata \
+    APP_MODE=standalone \
+    # Default port for PaaS platforms (Coolify/Dokploy use PORT env var)
+    PORT=5000
 
-# Start Supervisor
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Healthcheck for container orchestration
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-5000}/ || exit 1
+
+USER appuser
+
+# Expose main app port and websocket port
+EXPOSE 5000
+EXPOSE 8765
+
+CMD ["/app/start.sh"]
