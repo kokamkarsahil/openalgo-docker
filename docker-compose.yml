@@ -1,0 +1,69 @@
+# Docker Compose for Coolify/Dokploy deployment
+# SSL is handled by the platform (Traefik/Caddy)
+
+services:
+  openalgo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openalgo
+    
+    # Single port exposure - platform handles SSL termination
+    ports:
+      - "${PORT:-5000}:${PORT:-5000}"
+      - "8765:8765"  # WebSocket port
+    
+    # Persistent volumes for data
+    volumes:
+      - openalgo_db:/app/db
+      - openalgo_logs:/app/logs
+      - openalgo_log:/app/log
+      - openalgo_strategies:/app/strategies
+      - openalgo_keys:/app/keys
+    
+    # Environment configuration via platform
+    environment:
+      - PORT=${PORT:-5000}
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - FLASK_DEBUG=${FLASK_DEBUG:-0}
+      - APP_MODE=${APP_MODE:-standalone}
+      # Required: Set these in your platform's environment variables
+      - HOST_SERVER=${HOST_SERVER}
+      - REDIRECT_URL=${REDIRECT_URL}
+      - BROKER_API_KEY=${BROKER_API_KEY}
+      - BROKER_API_SECRET=${BROKER_API_SECRET}
+      - APP_KEY=${APP_KEY}
+      - API_KEY_PEPPER=${API_KEY_PEPPER}
+      # Optional: XTS broker credentials
+      - BROKER_API_KEY_MARKET=${BROKER_API_KEY_MARKET:-}
+      - BROKER_API_SECRET_MARKET=${BROKER_API_SECRET_MARKET:-}
+      # Optional: Database URLs (defaults to SQLite)
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///db/openalgo.db}
+      # WebSocket configuration
+      - WEBSOCKET_PORT=${WEBSOCKET_PORT:-8765}
+      - WEBSOCKET_URL=${WEBSOCKET_URL:-}
+      # Optional: Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-5000}/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+# Named volumes for data persistence
+volumes:
+  openalgo_db:
+    driver: local
+  openalgo_logs:
+    driver: local
+  openalgo_log:
+    driver: local
+  openalgo_strategies:
+    driver: local
+  openalgo_keys:
+    driver: local
