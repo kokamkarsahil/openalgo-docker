@@ -48,12 +48,12 @@ jobs:
 
     steps:
       - name: Checkout Helper Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: helper
 
       - name: Checkout Upstream OpenAlgo Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ needs.check-release.outputs.tag }}
