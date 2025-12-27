@@ -81,6 +81,7 @@ jobs:
         uses: docker/bake-action@v6
         with:
           workdir: build-context
+          source: .
           push: true
           files: |
             docker-bake.hcl
