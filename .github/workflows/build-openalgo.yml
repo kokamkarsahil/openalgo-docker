@@ -2,9 +2,6 @@ name: Build OpenAlgo
 
 on:
   workflow_dispatch:
-  schedule:
-    # Check for new releases daily at midnight UTC
-    - cron: '0 0 * * *'
 
 env:
   REGISTRY: ghcr.io
@@ -48,12 +45,12 @@ jobs:
 
     steps:
       - name: Checkout Helper Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           path: helper
 
       - name: Checkout Upstream OpenAlgo Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ needs.check-release.outputs.tag }}
@@ -81,7 +78,6 @@ jobs:
         uses: docker/bake-action@v6
         with:
           workdir: build-context
-          source: .
           push: true
           files: |
             docker-bake.hcl
