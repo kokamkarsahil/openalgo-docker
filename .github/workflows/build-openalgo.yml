@@ -48,12 +48,12 @@ jobs:
 
     steps:
       - name: Checkout Helper Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: helper
 
       - name: Checkout Upstream OpenAlgo Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ needs.check-release.outputs.tag }}
@@ -78,7 +78,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push with Bake
-        uses: docker/bake-action@v5
+        uses: docker/bake-action@v6
         with:
           workdir: build-context
           push: true
