@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+LICENSE
+*.md
+
+# CI/CD
+.github/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment files (should be mounted or generated)
+.env
+.env.example
+.env.local
+
+# Docker files not needed in context
+docker-compose*.yml
+docker-bake.hcl
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/

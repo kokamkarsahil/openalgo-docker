@@ -2,6 +2,15 @@ name: Build OpenAlgo
 
 on:
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if image exists'
+        required: false
+        default: 'false'
+        type: boolean
+  schedule:
+    # Check for new releases daily at midnight UTC
+    - cron: '0 0 * * *'
 
 env:
   REGISTRY: ghcr.io
@@ -25,8 +34,10 @@ jobs:
       - name: Check if Image Already Exists
         id: check
         run: |
-          # Try to pull the image with the tag
-          if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_release.outputs.tag }} > /dev/null 2>&1; then
+          if [ "${{ inputs.force_rebuild }}" = "true" ]; then
+            echo "Force rebuild requested"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          elif docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_release.outputs.tag }} > /dev/null 2>&1; then
             echo "Image already exists for tag ${{ steps.get_release.outputs.tag }}"
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
@@ -49,17 +60,24 @@ jobs:
         with:
           path: helper
 
-      - name: Checkout Upstream OpenAlgo Code
+      - name: Checkout Upstream OpenAlgo
         uses: actions/checkout@v4
         with:
           repository: ${{ env.UPSTREAM_REPO }}
           ref: ${{ needs.check-release.outputs.tag }}
           path: build-context
 
-      - name: Setup Custom Dockerfile
+      - name: Setup Build Context
         run: |
+          # Copy our custom Dockerfile and scripts
           cp helper/Dockerfile build-context/Dockerfile
           cp helper/docker-bake.hcl build-context/docker-bake.hcl
+          cp helper/start.sh build-context/start.sh
+          
+          # Make start.sh executable
+          chmod +x build-context/start.sh
+          
+          echo "Build context prepared with custom files"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -67,22 +85,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to the Container Registry
+      - name: Log in to Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and Push with Bake
+      - name: Build and Push
         uses: docker/bake-action@v6
         with:
           workdir: build-context
           push: true
-          files: |
-            docker-bake.hcl
+          files: docker-bake.hcl
           set: |
             *.args.TAG=${{ needs.check-release.outputs.tag }}
             *.args.REGISTRY=${{ env.REGISTRY }}
             *.args.IMAGE_NAME=${{ env.IMAGE_NAME }}
-

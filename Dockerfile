@@ -1,71 +1,90 @@
-# ------------------------------ Builder Stage ------------------------------ #
-FROM python:3.12-bullseye AS builder
+# =============================================================================
+# OpenAlgo Docker Image
+# Optimized for Coolify/Dokploy deployment
+# =============================================================================
 
+# ------------------------------ Builder Stage --------------------------------
+FROM python:3.12-slim-bookworm AS builder
+
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl build-essential && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+        curl \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# Copy dependency specification first for better layer caching
 COPY pyproject.toml .
 
-# Create isolated virtual-env with uv, then add gunicorn and eventlet
+# Install dependencies using uv (fast Python package manager)
 RUN pip install --no-cache-dir uv && \
     uv venv .venv && \
     uv pip install --upgrade pip && \
     uv sync && \
     uv pip install gunicorn eventlet==0.35.2 && \
-    rm -rf /root/.cache
+    rm -rf /root/.cache /root/.uv
 
-# ----------------------------- Production Stage ---------------------------- #
-FROM python:3.12-slim-bullseye AS production
+# ----------------------------- Production Stage ------------------------------
+FROM python:3.12-slim-bookworm AS production
 
-# Set timezone to IST (Asia/Kolkata) and install minimal runtime deps
+# Labels for container metadata
+LABEL org.opencontainers.image.title="OpenAlgo"
+LABEL org.opencontainers.image.description="OpenAlgo Trading Platform - Optimized for Coolify/Dokploy"
+LABEL org.opencontainers.image.source="https://github.com/marketcalls/openalgo"
+
+# Install minimal runtime dependencies and set timezone
 RUN apt-get update && apt-get install -y --no-install-recommends \
         tzdata \
-        curl && \
-    ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && \
-    dpkg-reconfigure -f noninteractive tzdata && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+        curl \
+        tini \
+    && ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime \
+    && dpkg-reconfigure -f noninteractive tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd --create-home appuser
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
 
 WORKDIR /app
 
-# Copy the ready-made venv and source with correct ownership
+# Copy virtual environment from builder
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+
+# Copy application source
 COPY --chown=appuser:appuser . .
 
-# Create required directories with proper permissions
+# Copy our custom start script (overrides upstream)
+COPY --chown=appuser:appuser start.sh /app/start.sh
+
+# Create required directories and set permissions
 RUN mkdir -p /app/log /app/log/strategies /app/db /app/strategies \
              /app/strategies/scripts /app/strategies/examples /app/keys /app/logs && \
     chown -R appuser:appuser /app && \
-    chmod -R 755 /app/strategies /app/log && \
+    chmod -R 755 /app/strategies /app/log /app/logs && \
     chmod 700 /app/keys && \
-    touch /app/.env && chown appuser:appuser /app/.env && chmod 666 /app/.env
+    touch /app/.env && chown appuser:appuser /app/.env && chmod 644 /app/.env && \
+    chmod +x /app/start.sh && \
+    # Remove Windows line endings if any
+    sed -i 's/\r$//' /app/start.sh
 
-# Copy and fix entrypoint script
-COPY --chown=appuser:appuser start.sh /app/start.sh
-RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
-
-# ---- Runtime Environment -------------------------------------------------- #
+# Runtime environment
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TZ=Asia/Kolkata \
     APP_MODE=standalone \
-    # Default port for PaaS platforms (Coolify/Dokploy use PORT env var)
     PORT=5000
 
-# Healthcheck for container orchestration
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-5000}/ || exit 1
+    CMD curl -sf http://localhost:${PORT:-5000}/ || exit 1
 
+# Switch to non-root user
 USER appuser
 
-# Expose main app port and websocket port
-EXPOSE 5000
-EXPOSE 8765
+# Expose ports
+EXPOSE 5000 8765
 
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/app/start.sh"]
