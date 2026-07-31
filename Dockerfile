@@ -1,11 +1,14 @@
 # =============================================================================
 # OpenAlgo Docker Image
-# Optimized for Coolify, Dokploy, and Self-Hosted Cloud Deployments
-# Multi-stage build: Python dependencies + Node frontend + Slim production
+# Optimized for Coolify, Dokploy, Railway, and Self-Hosted Cloud Deployments
+# Multi-stage build: Python (uv) + Frontend (Node 22 / npm ci) + Slim Production
 # =============================================================================
 
 # ------------------------------ Python Builder Stage -----------------------
 FROM python:3.12-slim-bookworm AS python-builder
+
+# Copy official uv binary (ultra-fast Python package manager)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -18,9 +21,8 @@ WORKDIR /app
 # Copy dependency specification first for caching
 COPY pyproject.toml .
 
-# Install dependencies using uv (fast Python package manager)
-RUN pip install --no-cache-dir uv && \
-    uv venv .venv && \
+# Create virtualenv and sync dependencies using uv
+RUN uv venv .venv && \
     uv pip install --upgrade pip && \
     uv sync && \
     uv pip install "gunicorn>=25.0,<26" eventlet==0.35.2 && \
@@ -31,7 +33,7 @@ FROM node:22-bookworm-slim AS frontend-builder
 
 WORKDIR /app
 
-# Copy frontend package definitions and install dependencies
+# Copy frontend package definitions and install dependencies using npm ci
 COPY frontend/package*.json ./frontend/
 RUN cd frontend && npm ci
 
