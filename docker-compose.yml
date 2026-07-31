@@ -6,8 +6,12 @@
 
 services:
   openalgo:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/kokamkarsahil/openalgo:latest
     container_name: openalgo
+
     
     ports:
       - "${PORT:-5000}:${PORT:-5000}"

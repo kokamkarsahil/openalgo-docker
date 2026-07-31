@@ -19,3 +19,6 @@ logs/
 
 # Docker
 docker-compose.override.yml
+openalgo-src/
+.tmp/
+
