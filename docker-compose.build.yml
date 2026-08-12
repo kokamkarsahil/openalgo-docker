@@ -1,11 +1,14 @@
 services:
   openalgo:
-    image: ghcr.io/kokamkarsahil/openalgo-docker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openalgo:local
     container_name: openalgo
     restart: unless-stopped
     ports:
-      - "5000:5000"   # Flask Web UI & REST API
-      - "8765:8765"   # WebSocket Proxy
+      - "5000:5000"
+      - "8765:8765"
     environment:
       - HOST_SERVER=${HOST_SERVER:-http://localhost:5000}
       - REDIRECT_URL=${REDIRECT_URL:-http://localhost:5000/broker/callback}
