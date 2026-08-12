@@ -61,9 +61,10 @@ jobs:
             docker-bake.hcl
           targets: openalgo
           push: true
-          set: |
-            TAG=${{ env.UPSTREAM_TAG }}
-            REGISTRY=${{ env.REGISTRY }}
-            IMAGE_NAME=${{ env.IMAGE_NAME }}
-            UPSTREAM_REPO=${{ env.UPSTREAM_REPO }}
+        env:
+          TAG: ${{ env.UPSTREAM_TAG }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          UPSTREAM_REPO: ${{ env.UPSTREAM_REPO }}
+
 
