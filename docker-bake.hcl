@@ -13,6 +13,10 @@ variable "IMAGE_NAME" {
   default = "kokamkarsahil/openalgo"
 }
 
+variable "UPSTREAM_REPO" {
+  default = "marketcalls/openalgo"
+}
+
 group "default" {
   targets = ["openalgo"]
 }
@@ -28,6 +32,10 @@ target "openalgo" {
     "${REGISTRY}/${IMAGE_NAME}:${TAG}",
     "${REGISTRY}/${IMAGE_NAME}:latest"
   ]
+
+  args = {
+    UPSTREAM_REPO = "${UPSTREAM_REPO}"
+  }
 
   labels = {
     "org.opencontainers.image.title"       = "OpenAlgo"

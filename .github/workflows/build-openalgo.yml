@@ -62,5 +62,8 @@ jobs:
           targets: openalgo
           push: true
           set: |
-            *.tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.UPSTREAM_TAG }},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            *.args.UPSTREAM_REPO=${{ env.UPSTREAM_REPO }}
+            TAG=${{ env.UPSTREAM_TAG }}
+            REGISTRY=${{ env.REGISTRY }}
+            IMAGE_NAME=${{ env.IMAGE_NAME }}
+            UPSTREAM_REPO=${{ env.UPSTREAM_REPO }}
+
