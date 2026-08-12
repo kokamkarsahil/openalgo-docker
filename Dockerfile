@@ -1,126 +1,125 @@
-# =============================================================================
-# OpenAlgo Docker Image
-# Optimized for Coolify, Dokploy, Railway, and Self-Hosted Cloud Deployments
-# Multi-stage build: Python (uv) + Frontend (Node 22 / npm ci) + Slim Production
-# =============================================================================
+# Syntax=docker/dockerfile:1
+# Optimized Multi-stage Dockerfile for OpenAlgo (marketcalls/openalgo)
+# Built according to Astral uv & Node best practices for Coolify/Dokploy
 
-# ------------------------------ Python Builder Stage -----------------------
+# ==============================================================================
+# Stage 1: Python Builder
+# ==============================================================================
 FROM python:3.12-slim-bookworm AS python-builder
 
-# Copy official uv binary (ultra-fast Python package manager)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Build arguments for upstream source code fetching
+ARG UPSTREAM_REPO="marketcalls/openalgo"
+ARG UPSTREAM_REF="main"
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl \
-        build-essential \
+    curl \
+    git \
+    build-essential \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Install uv from official Astral image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Copy dependency specification first for caching
-COPY pyproject.toml .
-
-# Create virtualenv and sync dependencies using uv
-RUN uv venv .venv && \
-    uv pip install --upgrade pip && \
-    uv sync && \
-    uv pip install "gunicorn>=25.0,<26" eventlet==0.35.2 && \
-    rm -rf /root/.cache /root/.uv
-
-# ------------------------------ Frontend Builder Stage ---------------------
-FROM node:22-bookworm-slim AS frontend-builder
+# Set uv environment variables for optimization
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Copy frontend package definitions and install dependencies using npm ci
-COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm ci
+# Clone upstream OpenAlgo source if not building from local context
+RUN git clone --depth 1 --branch ${UPSTREAM_REF} https://github.com/${UPSTREAM_REPO}.git /app/src \
+    && cp -rn /app/src/* /app/ \
+    && rm -rf /app/src /app/.git
 
-# Copy frontend source and build static bundle
-COPY frontend/ ./frontend/
-RUN cd frontend && npm run build
+# Create virtual environment and install dependencies
+RUN uv venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
 
-# ----------------------------- Production Stage ------------------------------
+RUN if [ -f "pyproject.toml" ]; then \
+        uv pip install --no-cache -e . gunicorn eventlet; \
+    elif [ -f "requirements.txt" ]; then \
+        uv pip install --no-cache -r requirements.txt gunicorn eventlet; \
+    else \
+        uv pip install --no-cache gunicorn eventlet; \
+    fi
+
+# ==============================================================================
+# Stage 2: Frontend Builder (React 19 / Vite)
+# ==============================================================================
+FROM node:22-slim AS frontend-builder
+
+WORKDIR /app
+
+# Copy python-builder source to access frontend directory
+COPY --from=python-builder /app/frontend ./frontend
+
+# Install dependencies and build static assets
+RUN cd frontend \
+    && if [ -f "package-lock.json" ]; then npm ci; else npm install; fi \
+    && npm run build
+
+# ==============================================================================
+# Stage 3: Production Runtime
+# ==============================================================================
 FROM python:3.12-slim-bookworm AS production
 
-# Container metadata
-LABEL org.opencontainers.image.title="OpenAlgo"
-LABEL org.opencontainers.image.description="OpenAlgo Trading Platform - Optimized for Coolify/Dokploy/Docker"
-LABEL org.opencontainers.image.source="https://github.com/marketcalls/openalgo"
-
-# Install minimal runtime dependencies (including headless Chromium for Plotly export/Kaleido)
+# Set timezone to Asia/Kolkata (IST) & install runtime packages
+# Note: chromium and fonts-liberation are required by Plotly/Kaleido 1.x static chart generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        tzdata \
-        curl \
-        tini \
-        libopenblas0 \
-        libgomp1 \
-        libgfortran5 \
-        chromium \
-        fonts-liberation \
+    chromium \
+    fonts-liberation \
+    tzdata \
+    ca-certificates \
+    curl \
+    procps \
+    libsm6 \
+    libxext6 \
+    && rm -rf /var/lib/apt/lists/* \
     && ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime \
-    && dpkg-reconfigure -f noninteractive tzdata \
-    && rm -rf /var/lib/apt/lists/*
+    && dpkg-reconfigure --frontend noninteractive tzdata
 
-# Pin non-root user appuser to UID/GID 1000 explicitly for volume permission compatibility
+# Create dedicated non-root user and group pinned to UID/GID 1000
 RUN groupadd --gid 1000 appuser && \
     useradd --create-home --uid 1000 --gid 1000 appuser
 
 WORKDIR /app
 
-# Copy virtual environment from python-builder
+# Copy virtual environment and backend source code from python-builder
 COPY --from=python-builder --chown=appuser:appuser /app/.venv /app/.venv
+COPY --from=python-builder --chown=appuser:appuser /app /app
 
-# Copy application source code
-COPY --chown=appuser:appuser . .
-
-# Copy built frontend assets from frontend-builder
+# Copy compiled frontend static assets from frontend-builder
 COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/dist /app/frontend/dist
 
-# Copy startup script
-COPY --chown=appuser:appuser start.sh /app/start.sh
+# Copy container entrypoint script
+COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-# Create required runtime directories and configure permissions
-RUN mkdir -p /app/log /app/log/strategies /app/db /app/tmp /app/tmp/numba_cache /app/tmp/matplotlib \
-             /app/strategies /app/strategies/scripts /app/strategies/examples /app/keys /app/logs && \
-    chown appuser:appuser /app && \
-    chown -R appuser:appuser /app/log /app/db /app/tmp /app/strategies /app/keys /app/logs && \
-    chmod -R 755 /app/strategies /app/log /app/tmp /app/logs && \
-    chmod 700 /app/keys && \
-    touch /app/.env && chown appuser:appuser /app/.env && chmod 666 /app/.env && \
-    chmod +x /app/start.sh && \
-    sed -i 's/\r$//' /app/start.sh
+# Ensure persistent directories exist with correct ownership
+RUN mkdir -p /app/db /app/log /app/logs /app/strategies /app/keys /tmp/gunicorn_workers && \
+    chown -R appuser:appuser /app /tmp/gunicorn_workers
 
-# Runtime environment settings
+# Environment variables
 ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1 \
-    TZ=Asia/Kolkata \
-    APP_MODE=standalone \
     PORT=5000 \
-    TMPDIR=/app/tmp \
-    NUMBA_CACHE_DIR=/app/tmp/numba_cache \
-    LLVMLITE_TMPDIR=/app/tmp \
-    MPLCONFIGDIR=/app/tmp/matplotlib \
-    OPENBLAS_NUM_THREADS=2 \
-    OMP_NUM_THREADS=2 \
-    MKL_NUM_THREADS=2 \
-    NUMEXPR_NUM_THREADS=2 \
-    NUMBA_NUM_THREADS=2 \
+    WEBSOCKET_PORT=8765 \
     BROWSER_PATH=/usr/bin/chromium \
-    CHROME_BIN=/usr/bin/chromium
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -sf http://localhost:${PORT:-5000}/ || exit 1
+    CHROME_BIN=/usr/bin/chromium \
+    NUMBA_NUM_THREADS=2
 
 # Switch to non-root user
 USER appuser
 
-# Expose HTTP app port and WebSocket proxy port
+# Expose ports: 5000 (Flask Web UI / REST API) and 8765 (WebSocket Proxy)
 EXPOSE 5000 8765
 
-# Use tini as init process for signal forwarding and process reaping
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/app/start.sh"]
+# Container healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:5000/auth/check-setup || exit 1
+
+ENTRYPOINT ["/app/entrypoint.sh"]

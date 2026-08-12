@@ -8,97 +8,59 @@ on:
         required: false
         default: 'false'
         type: boolean
+  push:
+    branches:
+      - main
   schedule:
-    # Check for new releases daily at midnight UTC
+    # Check for new upstream releases daily at midnight UTC
     - cron: '0 0 * * *'
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/openalgo
+  IMAGE_NAME: ${{ github.repository }}
   UPSTREAM_REPO: marketcalls/openalgo
 
 jobs:
-  check-release:
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.get_release.outputs.tag }}
-      should_build: ${{ steps.check.outputs.should_build }}
-    steps:
-      - name: Get Latest Release Tag from Upstream
-        id: get_release
-        run: |
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/latest | jq -r .tag_name)
-          echo "Latest release is $LATEST_RELEASE"
-          echo "tag=$LATEST_RELEASE" >> $GITHUB_OUTPUT
-
-      - name: Check if Image Already Exists
-        id: check
-        run: |
-          if [ "${{ inputs.force_rebuild }}" = "true" ]; then
-            echo "Force rebuild requested"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          elif docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_release.outputs.tag }} > /dev/null 2>&1; then
-            echo "Image already exists for tag ${{ steps.get_release.outputs.tag }}"
-            echo "should_build=false" >> $GITHUB_OUTPUT
-          else
-            echo "Image does not exist, will build"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          fi
-        continue-on-error: true
-
-  build-and-push:
-    needs: check-release
-    if: needs.check-release.outputs.should_build == 'true' || github.event_name == 'workflow_dispatch'
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout Helper Repo
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          path: helper
 
-      - name: Checkout Upstream OpenAlgo
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.UPSTREAM_REPO }}
-          ref: ${{ needs.check-release.outputs.tag }}
-          path: build-context
-
-      - name: Setup Build Context
-        run: |
-          # Copy our custom Dockerfile and scripts
-          cp helper/Dockerfile build-context/Dockerfile
-          cp helper/docker-bake.hcl build-context/docker-bake.hcl
-          cp helper/start.sh build-context/start.sh
-          
-          # Make start.sh executable
-          chmod +x build-context/start.sh
-          
-          echo "Build context prepared with custom files"
-
-      - name: Set up QEMU
+      - name: Set up QEMU (for multi-arch ARM64/AMD64)
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and Push
-        uses: docker/bake-action@v6
+      - name: Fetch Upstream Release Info
+        id: upstream
+        run: |
+          UPSTREAM_TAG=$(curl -s https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "latest")
+          if [ -z "$UPSTREAM_TAG" ] || [ "$UPSTREAM_TAG" = "null" ]; then
+            UPSTREAM_TAG="latest"
+          fi
+          echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> $GITHUB_ENV
+          echo "Upstream tag resolved to: $UPSTREAM_TAG"
+
+      - name: Build and Push Docker Images via Bake
+        uses: docker/bake-action@v5
         with:
-          workdir: build-context
+          files: |
+            docker-bake.hcl
+          targets: openalgo
           push: true
-          files: docker-bake.hcl
           set: |
-            *.args.TAG=${{ needs.check-release.outputs.tag }}
-            *.args.REGISTRY=${{ env.REGISTRY }}
-            *.args.IMAGE_NAME=${{ env.IMAGE_NAME }}
+            *.tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.UPSTREAM_TAG }},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            *.args.UPSTREAM_REPO=${{ env.UPSTREAM_REPO }}

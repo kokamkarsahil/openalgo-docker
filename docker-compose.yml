@@ -1,68 +1,47 @@
-# =============================================================================
-# OpenAlgo Docker Compose
-# For Coolify/Dokploy/Local deployment
-# SSL is handled by the platform's reverse proxy (Traefik/Caddy)
-# =============================================================================
+version: '3.8'
 
 services:
   openalgo:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/kokamkarsahil/openalgo:latest
+    image: ghcr.io/${IMAGE_NAME:-kokamkarsahil/openalgo}:latest
     container_name: openalgo
-
-    
+    restart: unless-stopped
     ports:
-      - "${PORT:-5000}:${PORT:-5000}"
-      - "8765:8765"  # WebSocket
-    
-    volumes:
-      - openalgo_db:/app/db
-      - openalgo_logs:/app/logs
-      - openalgo_log:/app/log
-      - openalgo_strategies:/app/strategies
-      - openalgo_keys:/app/keys
-    
+      - "5000:5000"   # Flask Web UI & REST API
+      - "8765:8765"   # WebSocket Proxy
     environment:
-      # === REQUIRED ===
-      - HOST_SERVER=${HOST_SERVER}
-      - REDIRECT_URL=${REDIRECT_URL}
+      - HOST_SERVER=${HOST_SERVER:-http://localhost:5000}
+      - REDIRECT_URL=${REDIRECT_URL:-http://localhost:5000/broker/callback}
       - BROKER_API_KEY=${BROKER_API_KEY}
       - BROKER_API_SECRET=${BROKER_API_SECRET}
-      - APP_KEY=${APP_KEY}
-      - API_KEY_PEPPER=${API_KEY_PEPPER}
-      
-      # === OPTIONAL: Server ===
-      - PORT=${PORT:-5000}
-      - FLASK_ENV=${FLASK_ENV:-production}
-      - FLASK_DEBUG=${FLASK_DEBUG:-0}
-      - APP_MODE=${APP_MODE:-standalone}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      
-      # === OPTIONAL: WebSocket ===
-      - WEBSOCKET_PORT=${WEBSOCKET_PORT:-8765}
-      - WEBSOCKET_URL=${WEBSOCKET_URL:-}
-      
-      # === OPTIONAL: XTS Brokers ===
       - BROKER_API_KEY_MARKET=${BROKER_API_KEY_MARKET:-}
       - BROKER_API_SECRET_MARKET=${BROKER_API_SECRET_MARKET:-}
-      
-      # === OPTIONAL: Database ===
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///db/openalgo.db}
-    
+      - APP_KEY=${APP_KEY}
+      - API_KEY_PEPPER=${API_KEY_PEPPER}
+      - PORT=5000
+      - WEBSOCKET_PORT=8765
+      - FLASK_ENV=production
+      - LOG_LEVEL=INFO
+    volumes:
+      - openalgo_db:/app/db
+      - openalgo_logs:/app/log
+      - openalgo_strategies:/app/strategies
+      - openalgo_keys:/app/keys
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${PORT:-5000}/"]
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/auth/check-setup || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 40s
-    
-    restart: unless-stopped
+      start_period: 30s
 
 volumes:
   openalgo_db:
+    name: openalgo_db
   openalgo_logs:
-  openalgo_log:
+    name: openalgo_logs
   openalgo_strategies:
+    name: openalgo_strategies
   openalgo_keys:
+    name: openalgo_keys
