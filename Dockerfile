@@ -31,7 +31,7 @@ WORKDIR /app
 
 # Clone upstream OpenAlgo source if not building from local context
 RUN git clone --depth 1 --branch ${UPSTREAM_REF} https://github.com/${UPSTREAM_REPO}.git /app/src \
-    && cp -rn /app/src/* /app/ \
+    && cp -rn /app/src/. /app/ \
     && rm -rf /app/src /app/.git
 
 # Create virtual environment and install dependencies
