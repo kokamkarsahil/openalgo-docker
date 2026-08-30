@@ -1,6 +1,11 @@
+version: '3.8'
+
 services:
   openalgo:
-    image: ghcr.io/kokamkarsahil/openalgo-docker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/${IMAGE_NAME:-kokamkarsahil/openalgo}:latest
     container_name: openalgo
     restart: unless-stopped
     ports:

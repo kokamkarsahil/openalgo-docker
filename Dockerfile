@@ -39,11 +39,11 @@ RUN uv venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 RUN if [ -f "pyproject.toml" ]; then \
-        uv pip install --no-cache -e . gunicorn eventlet; \
+        uv pip install --no-cache -e . "gunicorn>=23.0.0,<26.0.0" eventlet; \
     elif [ -f "requirements.txt" ]; then \
-        uv pip install --no-cache -r requirements.txt gunicorn eventlet; \
+        uv pip install --no-cache -r requirements.txt "gunicorn>=23.0.0,<26.0.0" eventlet; \
     else \
-        uv pip install --no-cache gunicorn eventlet; \
+        uv pip install --no-cache "gunicorn>=23.0.0,<26.0.0" eventlet; \
     fi
 
 # ==============================================================================
@@ -98,18 +98,29 @@ COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/dist /app/fro
 COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Ensure persistent directories exist with correct ownership
-RUN mkdir -p /app/db /app/log /app/logs /app/strategies /app/keys /tmp/gunicorn_workers && \
+# Ensure persistent and temporary cache directories exist with correct ownership
+RUN mkdir -p /app/db /app/log /app/logs /app/strategies /app/strategies/scripts /app/strategies/examples /app/keys /app/tmp /app/tmp/numba_cache /app/tmp/matplotlib /tmp/gunicorn_workers && \
     chown -R appuser:appuser /app /tmp/gunicorn_workers
 
 # Environment variables
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app" \
     PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Asia/Kolkata \
+    APP_MODE=standalone \
     PORT=5000 \
     WEBSOCKET_PORT=8765 \
     BROWSER_PATH=/usr/bin/chromium \
     CHROME_BIN=/usr/bin/chromium \
+    TMPDIR=/app/tmp \
+    NUMBA_CACHE_DIR=/app/tmp/numba_cache \
+    LLVMLITE_TMPDIR=/app/tmp \
+    MPLCONFIGDIR=/app/tmp/matplotlib \
+    OPENBLAS_NUM_THREADS=2 \
+    OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    NUMEXPR_NUM_THREADS=2 \
     NUMBA_NUM_THREADS=2
 
 # Switch to non-root user
